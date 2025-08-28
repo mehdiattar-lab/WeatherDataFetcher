@@ -1,4 +1,4 @@
-PredictiveGridOptimization (PGO)
+# Weather data fetcher and publisher
 
 Author:
 
@@ -28,16 +28,18 @@ This repo includes ready-to-use Compose files. Just clone, build, and run.
 git clone <YOUR_REPO_URL>
 cd <YOUR_REPO_DIR>
 
-# build the fetcher image
+## build the fetcher image
+
 docker build -t weather-data-fetcher:latest .
 
-# bring up the stack (broker + fetcher + printer)
+## bring up the stack (broker + fetcher + printer)
+
 docker compose up -d
 
-# see only the JSON payloads from the printer container
+## see only the JSON payloads from the printer container
+
 docker logs -f mqtt-printer
 
-
-## Use only the weather-data-fetcher image
+# Use only the weather-data-fetcher image
 
 You can run the image standalone against any MQTT broker as well. The MQTT-Printer.py and Broker.py have been developed only for the sake of WeatherDataFetcher.py testing.
