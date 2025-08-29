@@ -10,14 +10,14 @@ Finland
 
 # Introduction
 
-the main code in this repository is WeatherDatafetcher.py. It Fetches weather realted data (solar irradiance and temperature) from a server, and publishes them to MQTT broker.
+The main code in this repository is WeatherDatafetcher.py. It Fetches weather data (solar irradiance and temperature) from a server, and publishes them to MQTT broker.
 
 ## WeatherDataFetcher (FMI → MQTT)
 
-Publishes **current observations** (temperature & solar irradiance) and **36-hour forecasts** from the **Finnish Meteorological Institute (FMI)** to **MQTT** as JSON.
+Fetches **current observations** (temperature & solar irradiance) and **36-hour forecasts** from the **Finnish Meteorological Institute (FMI) and publish them ** to **MQTT** as JSON.
 
-- Observations: every **minute**
-- Forecasts: every **hour** (36 hourly values)
+- Observations: publish every **minute**
+- Forecasts: publish every **hour** (36 hourly values)
 
 ---
 
