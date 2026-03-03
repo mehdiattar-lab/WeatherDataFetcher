@@ -1,34 +1,38 @@
 services:
-  broker:
-    image: eclipse-mosquitto:2
-    container_name: mqtt-broker
-    ports:
-      - "1883:1883"
-    volumes:
-      - ./mosquitto:/mosquitto/config     # folder that contains mosquitto.conf
-    restart: unless-stopped
+#  broker:
+#    image: eclipse-mosquitto:2
+#    container_name: mqtt-broker
+#    ports:
+#      - "1883:1883"
+#    volumes:
+#      - ./mosquitto:/mosquitto/config     # folder that contains mosquitto.conf
+#    restart: unless-stopped
 
   forecaster:
     image: weather-data-fetcher:latest
     container_name: weather-forecaster
-    depends_on:
-      - broker
+#    depends_on:
+#      - broker
+    networks: [mqtt-net]
     environment:
-      MQTT_BROKER: broker
+      MQTT_BROKER: "mqtt5"
       MQTT_PORT: "1883"
-      TOPIC_TEMP_MEAS: "WeatherMeasurement/Temperature"
-      TOPIC_IRR_MEAS:  "WeatherMeasurement/Irradiance"
-      TOPIC_TEMP_FC:   "WeatherMeasurement/Forecast/Temperature"
-      TOPIC_IRR_FC:    "WeatherMeasurement/Forecast/Irradiance"
+      TOPIC_TEMP_MEAS: "A-T/Measurement/Temperature/Mikkeli_lentoasema"
+      TOPIC_IRR_MEAS:  "A-T/Measurement/Irradiance/Juva_Partala"
+      TOPIC_TEMP_FC:   "A-T/Forecast/Temperature/Hirvensalmi"
+      TOPIC_IRR_FC:    "A-T/Forecast/Irradiance/Hirvensalmi"
     command: ["python","WeatherDataFetcher.py","--place","Hirvensalmi"]
     restart: unless-stopped
 
   printer:
     image: eclipse-mosquitto:2
     container_name: mqtt-printer
-    depends_on:
-      - broker
+    networks: [mqtt-net]
     # prints only payloads, ignores retained
-    command: ["mosquitto_sub","-h","broker","-p","1883","-t","WeatherMeasurement/#","-R","-F","%p"]
+    command: ["mosquitto_sub","-h","mqtt5","-p","1883","-t","WeatherMeasurement/#","-R","-F","%p"]
     restart: unless-stopped
+
+networks:
+  mqtt-net:
+    external: true
 

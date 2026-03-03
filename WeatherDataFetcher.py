@@ -37,10 +37,10 @@ MQTT_RETAIN = False
 PRINT_JSON_TO_STDOUT = False
 
 # ---- Topics (customize these) ----
-TOPIC_TEMP_MEAS = "Measurement/Temperature"
-TOPIC_IRR_MEAS  = "Measurement/Irradiance"
-TOPIC_TEMP_FC   = "Measurement/Forecast/Temperature"
-TOPIC_IRR_FC    = "Measurement/Forecast/Irradiance"
+TOPIC_TEMP_MEAS = "A-T/Measurement/Temperature/Mikkeli_lentoasema"
+TOPIC_IRR_MEAS  = "A-T/Measurement/Juva_Partala"
+TOPIC_TEMP_FC   = "A-T/Forecast/Irradiance/Hirvensalmi"
+TOPIC_IRR_FC    = "A-T/Forecast/Temperature/Hirvensalmi"
 
 # --- ENV OVERRIDES (add after USER CONFIG constants) ---
 import os
@@ -226,11 +226,11 @@ def build_temp_measurement_msg(topic: str, location_str: str, latest_t: Optional
         ts = iso_z(datetime.now(timezone.utc), "milliseconds")
         val = None
     return {
-        "MessageId": msg_id,
-        "Timestamp": ts,
-        "Temperature": {"Value": val, "Unit": "Cel"},
-        "Topic": topic,
-        "Location": location_str,
+        "messageid": msg_id,
+        "timestamp": ts,
+        "temperature": {"value": val, "unit": "Cel"},
+        "topic": topic,
+        "location": location_str,
     }
 
 def build_irr_measurement_msg(topic: str, location_str: str, latest_g: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -242,29 +242,29 @@ def build_irr_measurement_msg(topic: str, location_str: str, latest_g: Optional[
         ts = iso_z(datetime.now(timezone.utc), "milliseconds")
         val = None
     return {
-        "MessageId": msg_id,
-        "Timestamp": ts,
-        "Irradiance": {"Value": val, "Unit": "W/m2"},
-        "Topic": topic,
-        "Location": location_str,
+        "messageid": msg_id,
+        "timestamp": ts,
+        "irradiance": {"value": val, "unit": "W/m2"},
+        "topic": topic,
+        "location": location_str,
     }
 
 def build_forecast_msg(series_name: str, unit: str, topic: str, location_str: str,
                        times: List[datetime], values: List[Optional[float]]) -> Dict[str, Any]:
     msg_id = iso_z(datetime.now(timezone.utc), "milliseconds")
     return {
-        "MessageId": msg_id,
-        "Forecast": {
-            "TimeIndex": [iso_z(t) for t in times],
-            "Series": {
+        "messageId": msg_id,
+        "forecast": {
+            "timeindex": [iso_z(t) for t in times],
+            "series": {
                 series_name: {
                     "UnitOfMeasure": unit,
-                    "Values": values
+                    "values": values
                 }
             }
         },
-        "Topic": topic,
-        "Location": location_str,
+        "topic": topic,
+        "location": location_str,
     }
 
 # --- MQTT glue ----------------------------------------------------------------
