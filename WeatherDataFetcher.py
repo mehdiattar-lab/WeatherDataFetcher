@@ -38,9 +38,26 @@ PRINT_JSON_TO_STDOUT = False
 
 # ---- Topics (customize these) ----
 TOPIC_TEMP_MEAS = "A-T/Measurement/Temperature/Mikkeli_lentoasema"
-TOPIC_IRR_MEAS  = "A-T/Measurement/Juva_Partala"
+TOPIC_IRR_MEAS  = "A-T/Measurement/Irradiance/Juva_Partala"
 TOPIC_TEMP_FC   = "A-T/Forecast/Irradiance/Hirvensalmi"
 TOPIC_IRR_FC    = "A-T/Forecast/Temperature/Hirvensalmi"
+
+# ---- Measurement station fallbacks (primary first) ----
+# Use FMI "place" names here (human-readable, with spaces)
+# Format: "FMISID|Human name"
+TEMP_MEAS_PLACES = [
+    "855522|Mikkeli airport AWOS",
+    "101418|Juva Partala",
+    "101367|Joutsa Savenaho",
+    "101430|Savonlinna airport",
+]
+
+IRR_MEAS_PLACES = [
+    "101418|Juva Partala",
+    "855522|Mikkeli airport AWOS",
+    "101430|Savonlinna airport",
+    "101367|Joutsa Savenaho",
+]
 
 # --- ENV OVERRIDES (add after USER CONFIG constants) ---
 import os
@@ -58,6 +75,14 @@ TOPIC_TEMP_MEAS = os.getenv("TOPIC_TEMP_MEAS", TOPIC_TEMP_MEAS)
 TOPIC_IRR_MEAS  = os.getenv("TOPIC_IRR_MEAS", TOPIC_IRR_MEAS)
 TOPIC_TEMP_FC   = os.getenv("TOPIC_TEMP_FC", TOPIC_TEMP_FC)
 TOPIC_IRR_FC    = os.getenv("TOPIC_IRR_FC", TOPIC_IRR_FC)
+
+_env_temp_places = os.getenv("TEMP_MEAS_PLACES", "").strip()
+if _env_temp_places:
+    TEMP_MEAS_PLACES = [p.strip() for p in _env_temp_places.split(",") if p.strip()]
+
+_env_irr_places = os.getenv("IRR_MEAS_PLACES", "").strip()
+if _env_irr_places:
+    IRR_MEAS_PLACES = [p.strip() for p in _env_irr_places.split(",") if p.strip()]
 
 # ==============================================================================
 import argparse
@@ -216,8 +241,8 @@ def fetch_hourly_forecast(loc: Dict[str, str], hours: int) -> Dict[str, Any]:
     }
 
 # --- Message builders ----------------------------------------------------------
-
-def build_temp_measurement_msg(topic: str, location_str: str, latest_t: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def build_temp_measurement_msg(topic: str, location_str: str, latest_t: Optional[Dict[str, Any]],
+                               fallback_station: Optional[str] = None) -> Dict[str, Any]:
     msg_id = iso_z(datetime.now(timezone.utc), "milliseconds")
     if latest_t:
         ts = iso_z(latest_t["time"], "milliseconds")
@@ -225,15 +250,20 @@ def build_temp_measurement_msg(topic: str, location_str: str, latest_t: Optional
     else:
         ts = iso_z(datetime.now(timezone.utc), "milliseconds")
         val = None
-    return {
+    msg = {
         "messageid": msg_id,
         "timestamp": ts,
         "temperature": {"value": val, "unit": "Cel"},
         "topic": topic,
         "location": location_str,
     }
+    if fallback_station:
+        msg["fallbackStation"] = fallback_station
+    return msg
 
-def build_irr_measurement_msg(topic: str, location_str: str, latest_g: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+
+def build_irr_measurement_msg(topic: str, location_str: str, latest_g: Optional[Dict[str, Any]],
+                              fallback_station: Optional[str] = None) -> Dict[str, Any]:
     msg_id = iso_z(datetime.now(timezone.utc), "milliseconds")
     if latest_g:
         ts = iso_z(latest_g["time"], "milliseconds")
@@ -241,13 +271,17 @@ def build_irr_measurement_msg(topic: str, location_str: str, latest_g: Optional[
     else:
         ts = iso_z(datetime.now(timezone.utc), "milliseconds")
         val = None
-    return {
+    msg = {
         "messageid": msg_id,
         "timestamp": ts,
         "irradiance": {"value": val, "unit": "W/m2"},
         "topic": topic,
         "location": location_str,
     }
+    if fallback_station:
+        msg["fallbackStation"] = fallback_station
+    return msg
+
 
 def build_forecast_msg(series_name: str, unit: str, topic: str, location_str: str,
                        times: List[datetime], values: List[Optional[float]]) -> Dict[str, Any]:
@@ -344,11 +378,56 @@ def main():
     # --- One-shot mode --------------------------------------------------------
     if args.once:
         try:
-            latest = fetch_latest_measurements(loc)
-            temp_msg = build_temp_measurement_msg(TOPIC_TEMP_MEAS, location_str, latest["t"])
-            irr_msg  = build_irr_measurement_msg(TOPIC_IRR_MEAS, location_str, latest["g"])
+            # Measurements with per-parameter fallback lists
+            if TEMP_MEAS_PLACES:
+                _temp_primary_id, temp_primary = TEMP_MEAS_PLACES[0].split("|", 1)
+            else:
+                temp_primary = (args.place or DEFAULT_PLACE)
+
+            if IRR_MEAS_PLACES:
+                _irr_primary_id, irr_primary = IRR_MEAS_PLACES[0].split("|", 1)
+            else:
+                irr_primary = (args.place or DEFAULT_PLACE)
+
+            latest_t: Optional[Dict[str, Any]] = None
+            latest_g: Optional[Dict[str, Any]] = None
+            temp_fallback_station: Optional[str] = None
+            irr_fallback_station: Optional[str] = None
+
+            # Temperature: try places in order until we get a value
+            for i, item in enumerate(TEMP_MEAS_PLACES or []):
+                fmisid, name = item.split("|", 1)
+                try:
+                    got = fetch_latest_measurements({"fmisid": fmisid})
+                except (requests.HTTPError, requests.RequestException) as e:
+                    sys.stderr.write(f"[FMI] Temp station failed (fmisid={fmisid}, name={name}): {e}\n")
+                    continue
+                if got["t"] is not None:
+                    latest_t = got["t"]
+                    if i != 0:
+                        temp_fallback_station = name
+                    break
+
+            # Irradiance: try places in order until we get a value
+            for i, item in enumerate(IRR_MEAS_PLACES or []):
+                fmisid, name = item.split("|", 1)
+                try:
+                    got = fetch_latest_measurements({"fmisid": fmisid})
+                except (requests.HTTPError, requests.RequestException) as e:
+                    sys.stderr.write(f"[FMI] Irr station failed (fmisid={fmisid}, name={name}): {e}\n")
+                    continue
+                if got["g"] is not None:
+                    latest_g = got["g"]
+                    if i != 0:
+                        irr_fallback_station = name
+                    break
+
+            # Keep location field as the PRIMARY station name
+            temp_msg = build_temp_measurement_msg(TOPIC_TEMP_MEAS, temp_primary, latest_t, temp_fallback_station)
+            irr_msg  = build_irr_measurement_msg(TOPIC_IRR_MEAS,  irr_primary,  latest_g, irr_fallback_station)
+
             publish_json(client, TOPIC_TEMP_MEAS, temp_msg)
-            publish_json(client, TOPIC_IRR_MEAS, irr_msg)
+            publish_json(client, TOPIC_IRR_MEAS,  irr_msg)
 
             fc = fetch_hourly_forecast(loc, args.hours)
             temp_fc_msg = build_forecast_msg("Temperature", "Cel", TOPIC_TEMP_FC, location_str, fc["times"], fc["temp_vals"])
@@ -379,9 +458,45 @@ def main():
 
             # 1) Measurements (every minute)
             try:
-                latest = fetch_latest_measurements(loc)
-                temp_msg = build_temp_measurement_msg(TOPIC_TEMP_MEAS, location_str, latest["t"])
-                irr_msg  = build_irr_measurement_msg(TOPIC_IRR_MEAS, location_str, latest["g"])
+                # Measurements with per-parameter fallback lists
+                if TEMP_MEAS_PLACES:
+                    _temp_primary_id, temp_primary = TEMP_MEAS_PLACES[0].split("|", 1)
+                else:
+                    temp_primary = (args.place or DEFAULT_PLACE)
+
+                if IRR_MEAS_PLACES:
+                    _irr_primary_id, irr_primary = IRR_MEAS_PLACES[0].split("|", 1)
+                else:
+                    irr_primary = (args.place or DEFAULT_PLACE)
+
+                latest_t: Optional[Dict[str, Any]] = None
+                latest_g: Optional[Dict[str, Any]] = None
+                temp_fallback_station: Optional[str] = None
+                irr_fallback_station: Optional[str] = None
+
+                # Temperature
+                for i, item in enumerate(TEMP_MEAS_PLACES or []):
+                    fmisid, name = item.split("|", 1)
+                    got = fetch_latest_measurements({"fmisid": fmisid})
+                    if got["t"] is not None:
+                        latest_t = got["t"]
+                        if i != 0:
+                            temp_fallback_station = name
+                        break
+
+                # Irradiance
+                for i, item in enumerate(IRR_MEAS_PLACES or []):
+                    fmisid, name = item.split("|", 1)
+                    got = fetch_latest_measurements({"fmisid": fmisid})
+                    if got["g"] is not None:
+                        latest_g = got["g"]
+                        if i != 0:
+                            irr_fallback_station = name
+                        break
+
+                temp_msg = build_temp_measurement_msg(TOPIC_TEMP_MEAS, temp_primary, latest_t, temp_fallback_station)
+                irr_msg  = build_irr_measurement_msg(TOPIC_IRR_MEAS,  irr_primary,  latest_g, irr_fallback_station)
+
                 publish_json(client, TOPIC_TEMP_MEAS, temp_msg)
                 publish_json(client, TOPIC_IRR_MEAS,  irr_msg)
             except requests.HTTPError as e:
